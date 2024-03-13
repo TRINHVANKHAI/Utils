@@ -3,7 +3,6 @@
  * Description: This code use for synthesizing bayer pattern based on
  * the input value
  */
-
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -15,6 +14,13 @@ typedef enum _bayer_pattern {
     BAYER_PATTERN_GRBG,
     BAYER_PATTERN_RGGB
 } bayer_pattern_t;
+
+static const char *bayer_pattern_desc[4] = {
+    "BGGR",
+    "GBRG",
+    "GRBG",
+    "RGGB"
+};
 
 struct illumination_profile {
     const char *desc;
@@ -28,7 +34,9 @@ struct illumination_profile {
     uint16_t b;
 };
 
-
+/*
+*
+*/
 #define IMAGE_WIDTH 3840
 #define IMAGE_HEIGHT 2160
 #define BAYER_PATTERN BAYER_PATTERN_GBRG
@@ -36,7 +44,7 @@ struct illumination_profile {
 
 struct illumination_profile illumination_profiles[] = {
     {
-        .desc = "RGGB_A",
+        .desc = "_A",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
@@ -47,7 +55,7 @@ struct illumination_profile illumination_profiles[] = {
         .b  =  51,
     },
     {
-        .desc = "RGGB_F11",
+        .desc = "_F11",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
@@ -58,7 +66,7 @@ struct illumination_profile illumination_profiles[] = {
         .b  = 64,
     },
     {
-        .desc = "RGGB_F2",
+        .desc = "_F2",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
@@ -69,7 +77,7 @@ struct illumination_profile illumination_profiles[] = {
         .b  = 120,
     },
     {
-        .desc = "RGGB_D50",
+        .desc = "_D50",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
@@ -80,7 +88,7 @@ struct illumination_profile illumination_profiles[] = {
         .b  = 71,
     },
     {
-        .desc = "RGGB_D65",
+        .desc = "_D65",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
@@ -238,10 +246,11 @@ int main(int argc, char* argv[]) {
             printf("Error fill pattern\n");
         }
         
-        sprintf(filename, "output_%dx%d_RAW%d_%s.raw",
+        sprintf(filename, "output_%dx%d_RAW%d_%s_%s.raw",
         illumination_profiles[i].width,
         illumination_profiles[i].height,
         OUTPUT_BITS,
+        bayer_pattern_desc[illumination_profiles[i].bayer_pattern],
         illumination_profiles[i].desc);
         
         outfile = fopen(filename, "wb");
@@ -261,3 +270,4 @@ int main(int argc, char* argv[]) {
     
     return 0;
 }
+
