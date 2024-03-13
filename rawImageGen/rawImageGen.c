@@ -4,7 +4,6 @@
  * the input value
  */
 
-
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -29,8 +28,11 @@ struct illumination_profile {
     uint16_t b;
 };
 
-#define IMAGE_WIDTH 1920
-#define IMAGE_HEIGHT 1080
+
+#define IMAGE_WIDTH 3840
+#define IMAGE_HEIGHT 2160
+#define BAYER_PATTERN BAYER_PATTERN_GBRG
+#define OUTPUT_BITS 10
 
 struct illumination_profile illumination_profiles[] = {
     {
@@ -38,29 +40,29 @@ struct illumination_profile illumination_profiles[] = {
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
-        .bayer_pattern = BAYER_PATTERN_RGGB,
-        .r  = 159,
-        .g1 = 180,
-        .g2 = 180,
-        .b  =  84,
+        .bayer_pattern = BAYER_PATTERN,
+        .r  = 150,
+        .g1 = 166,
+        .g2 = 166,
+        .b  =  51,
     },
     {
         .desc = "RGGB_F11",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
-        .bayer_pattern = BAYER_PATTERN_RGGB,
-        .r  = 166,
-        .g1 = 214,
-        .g2 = 214,
-        .b  = 116,
+        .bayer_pattern = BAYER_PATTERN,
+        .r  = 136,
+        .g1 = 176,
+        .g2 = 176,
+        .b  = 64,
     },
     {
         .desc = "RGGB_F2",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
-        .bayer_pattern = BAYER_PATTERN_RGGB,
+        .bayer_pattern = BAYER_PATTERN,
         .r  = 174,
         .g1 = 218,
         .g2 = 218,
@@ -71,25 +73,28 @@ struct illumination_profile illumination_profiles[] = {
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
-        .bayer_pattern = BAYER_PATTERN_RGGB,
-        .r  = 167,
-        .g1 = 228,
-        .g2 = 228,
-        .b  = 138,
+        .bayer_pattern = BAYER_PATTERN,
+        .r  = 89,
+        .g1 = 140,
+        .g2 = 140,
+        .b  = 71,
     },
     {
         .desc = "RGGB_D65",
         .width = IMAGE_WIDTH,
         .height = IMAGE_HEIGHT,
         .bits = 8,
-        .bayer_pattern = BAYER_PATTERN_RGGB,
-        .r  = 110,
-        .g1 = 163,
-        .g2 = 163,
-        .b  = 109,
+        .bayer_pattern = BAYER_PATTERN,
+        .r  = 88,
+        .g1 = 155,
+        .g2 = 155,
+        .b  = 84,
     },
 };
 
+/*
+*
+*/
 
 int fillBayerPattern(uint16_t *pbuf, struct illumination_profile *iProfile) {
     int x,y;
@@ -198,6 +203,10 @@ int main(int argc, char* argv[]) {
     char filename[512];
     double scaleFactor;
     uint16_t maxValue;
+    unsigned char bitsScale = OUTPUT_BITS > illumination_profiles[i].bits ? 
+                              OUTPUT_BITS - illumination_profiles[i].bits : 0;
+    unsigned char bytesPerPixel = (OUTPUT_BITS % 8 == 0) ?
+                                   OUTPUT_BITS/8 : OUTPUT_BITS/8+1;
     FILE *outfile;
     uint16_t *image_buf;
     ssize_t outfile_size;
@@ -212,13 +221,13 @@ int main(int argc, char* argv[]) {
                        illumination_profiles[i].g1 : illumination_profiles[i].g2;
             if(maxValue==0) maxValue = 210;
             scaleFactor = 210/(double)maxValue;
-            illumination_profiles[i].r  = (uint16_t)(illumination_profiles[i].r *16*scaleFactor);
-            illumination_profiles[i].g1 = (uint16_t)(illumination_profiles[i].g1*16*scaleFactor);
-            illumination_profiles[i].g2 = (uint16_t)(illumination_profiles[i].g2*16*scaleFactor);
-            illumination_profiles[i].b  = (uint16_t)(illumination_profiles[i].b *16*scaleFactor);
+            illumination_profiles[i].r  = (uint16_t)(illumination_profiles[i].r *(1<<bitsScale)*scaleFactor);
+            illumination_profiles[i].g1 = (uint16_t)(illumination_profiles[i].g1*(1<<bitsScale)*scaleFactor);
+            illumination_profiles[i].g2 = (uint16_t)(illumination_profiles[i].g2*(1<<bitsScale)*scaleFactor);
+            illumination_profiles[i].b  = (uint16_t)(illumination_profiles[i].b *(1<<bitsScale)*scaleFactor);
         }
 
-        outfile_size = illumination_profiles[i].width*illumination_profiles[i].height*2;
+        outfile_size = illumination_profiles[i].width*illumination_profiles[i].height*bytesPerPixel;
 
         image_buf = malloc(outfile_size);
         if(image_buf==NULL) {
@@ -229,7 +238,12 @@ int main(int argc, char* argv[]) {
             printf("Error fill pattern\n");
         }
         
-        sprintf(filename, "output_RAW12_%s.raw", illumination_profiles[i].desc);                
+        sprintf(filename, "output_%dx%d_RAW%d_%s.raw",
+        illumination_profiles[i].width,
+        illumination_profiles[i].height,
+        OUTPUT_BITS,
+        illumination_profiles[i].desc);
+        
         outfile = fopen(filename, "wb");
         fwrite(image_buf, outfile_size, 1, outfile);
         fflush(outfile);
