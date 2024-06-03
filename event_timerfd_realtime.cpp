@@ -16,12 +16,18 @@
 #include <event.h>
 
 static struct timeval g_tv;
-static int timer_fd;
-static char timer_fd_dmp[8];
+static char timer_dmp[8];
+
+/*
+ * fd: Timer fd
+ * event:
+ */
+
 static void timer_cb (evutil_socket_t fd, short event, void *args)
 {
+
+    read(fd, timer_dmp, 8);
     gettimeofday(&g_tv, NULL);
-    read(timer_fd, timer_fd_dmp, 8);
     printf("[%ld.%06ld] timer cb\n", g_tv.tv_sec%100, g_tv.tv_usec);
 }
 
@@ -46,7 +52,6 @@ void *thread_func(void *args)
         return NULL;
     }
 
-    timer_fd = tfd;
     struct event_config *evcfg = event_config_new();
     if(evcfg == NULL) {
         printf("Create evbase config failed\n");
