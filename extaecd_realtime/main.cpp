@@ -33,6 +33,8 @@ struct pdata {
     int64_t ns_jitter_max;
 };
 
+static struct timespec shared_timer;
+
 static void fst_timer_cb (evutil_socket_t fd, short event, void *args)
 {
     struct pdata *pdat = (struct pdata *)args;
@@ -68,6 +70,7 @@ void *tm_thread_fst(void *args)
 {
     /* Do RT specific stuff here */
     int ret;
+    int64_t next_tick;
     struct pdata pdat;
     memset(&pdat, 0, sizeof(pdat));
     pdat.gpio = new GpioDev("gpiochip2", 22);
@@ -76,8 +79,12 @@ void *tm_thread_fst(void *args)
     tm_sleep.tv_nsec = FST_TIME_INTERVAL_NS;
     clock_gettime(CLOCK_MONOTONIC, &pdat.pre_time);
     clock_gettime(CLOCK_MONOTONIC, &pdat.cur_time);
+    tm_sleep = shared_timer;
     while(1) {
-        clock_nanosleep( CLOCK_MONOTONIC, 0, &tm_sleep, NULL);
+        next_tick = (tm_sleep.tv_sec * 1000000000L + tm_sleep.tv_nsec) + FST_TIME_INTERVAL_NS;
+        tm_sleep.tv_sec  = next_tick / 1000000000L;
+        tm_sleep.tv_nsec = next_tick % 1000000000L;
+        clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &tm_sleep, NULL);
         fst_timer_cb (0, 0, &pdat);
     }
 
@@ -91,6 +98,7 @@ void *tm_thread_snd(void *args)
 {
     /* Do RT specific stuff here */
     int ret;
+    int64_t next_tick;
     struct pdata pdat;
     memset(&pdat, 0, sizeof(pdat));
     pdat.gpio = new GpioDev("gpiochip2", 23);
@@ -99,8 +107,12 @@ void *tm_thread_snd(void *args)
     tm_sleep.tv_nsec = SND_TIME_INTERVAL_NS;
     clock_gettime(CLOCK_MONOTONIC, &pdat.pre_time);
     clock_gettime(CLOCK_MONOTONIC, &pdat.cur_time);
+    tm_sleep = shared_timer;
     while(1) {
-        clock_nanosleep( CLOCK_MONOTONIC, 0, &tm_sleep, NULL);
+        next_tick = (tm_sleep.tv_sec * 1000000000L + tm_sleep.tv_nsec) + SND_TIME_INTERVAL_NS;
+        tm_sleep.tv_sec  = next_tick / 1000000000L;
+        tm_sleep.tv_nsec = next_tick % 1000000000L;
+        clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &tm_sleep, NULL);
         snd_timer_cb (0, 0, &pdat);
     }
 
@@ -116,9 +128,10 @@ int main(int argc, char* argv[])
     pthread_attr_t attr;
     pthread_t tm_fst, tm_snd;
     int ret;
+    int latency_target_fd = -1;
+    int32_t latency_target_value = 0;
+    clock_gettime(CLOCK_MONOTONIC, &shared_timer);
 #if 1
-    static int latency_target_fd = -1;
-    static int32_t latency_target_value = 0;
 
     /* Latency trick
      * if the file /dev/cpu_dma_latency exists,
@@ -185,22 +198,26 @@ int main(int argc, char* argv[])
         goto out;
     }
 
-    /* Create a pthread with specified attributes */
     ret = pthread_create(&tm_fst, &attr, tm_thread_fst, NULL);
     if (ret) {
         printf("create pthread failed\n");
         goto out;
     }
 
-    /* Create a pthread with specified attributes */
     ret = pthread_create(&tm_snd, &attr, tm_thread_snd, NULL);
     if (ret) {
         printf("create pthread failed\n");
         goto out;
     }
 #else
-    /* Create a pthread with specified attributes */
-    ret = pthread_create(&thread, NULL, thread_func, NULL);
+
+    ret = pthread_create(&tm_fst, NULL, tm_thread_fst, NULL);
+    if (ret) {
+        printf("create pthread failed\n");
+        goto out;
+    }
+
+    ret = pthread_create(&tm_snd, NULL, tm_thread_snd, NULL);
     if (ret) {
         printf("create pthread failed\n");
         goto out;
