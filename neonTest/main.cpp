@@ -41,6 +41,145 @@ int imageApplyUVGainsNV12(uint8_t *pSrcBuf, uint8_t *pDstBuf, int width, int hei
     return 0;
 }
 
+
+int imageApplyUVGainsNV12x2(uint8_t *pSrcBuf, uint8_t *pDstBuf, int width, int height, float uGain, float vGain)
+{
+    size_t i;
+    size_t imageBufSize = width*height/2;
+    size_t uvOffset     = width*height;
+    int16x8_t uGains = vdupq_n_s16(uGain*(1<<FRACBIT));
+    int16x8_t vGains = vdupq_n_s16(vGain*(1<<FRACBIT));
+    uint8x8x4_t pixData;
+    int16x8x4_t tmpData;
+    uint8_t *pUvSrcBuf = pSrcBuf+uvOffset;
+    uint8_t *pUvDstBuf = pDstBuf+uvOffset;
+    for(i=0; i<imageBufSize; i+=32)
+    {
+        pixData = vld4_u8(pUvSrcBuf+i);
+        tmpData.val[0] = (int16x8_t)vshll_n_u8(pixData.val[0], LSHIFTBIT);
+        tmpData.val[1] = (int16x8_t)vshll_n_u8(pixData.val[1], LSHIFTBIT);
+        tmpData.val[2] = (int16x8_t)vshll_n_u8(pixData.val[2], LSHIFTBIT);
+        tmpData.val[3] = (int16x8_t)vshll_n_u8(pixData.val[3], LSHIFTBIT);
+
+        tmpData.val[0] = vqrdmulhq_s16(tmpData.val[0], uGains);
+        tmpData.val[1] = vqrdmulhq_s16(tmpData.val[1], vGains);
+        tmpData.val[2] = vqrdmulhq_s16(tmpData.val[2], uGains);
+        tmpData.val[3] = vqrdmulhq_s16(tmpData.val[3], vGains);
+
+        pixData.val[0] = vqmovun_s16(tmpData.val[0]);
+        pixData.val[1] = vqmovun_s16(tmpData.val[1]);
+        pixData.val[2] = vqmovun_s16(tmpData.val[2]);
+        pixData.val[3] = vqmovun_s16(tmpData.val[3]);
+
+        vst4_u8(pUvDstBuf+i, pixData);
+    }
+
+    return 0;
+}
+
+
+int imageAvgStridex32(uint16_t *pSrcBuf, size_t length, uint16_t &outAvg)
+{
+    size_t i;
+    uint64_t sum=0;
+    uint16x8x4_t vPixData;
+
+    if(((length%32)!=0) || (length==0))
+    {
+        return -1;
+    }
+    for(i=0; i<length; i+=32)
+    {
+        vPixData = vld4q_u16(pSrcBuf+i);
+        sum += vaddvq_u16(vPixData.val[0]);
+        sum += vaddvq_u16(vPixData.val[1]);
+        sum += vaddvq_u16(vPixData.val[2]);
+        sum += vaddvq_u16(vPixData.val[3]);
+    }
+    outAvg = sum / length;
+    return 0;
+}
+#if 0
+int imageAvgStridex16(uint16_t *pSrcBuf, size_t length, uint16_t &outAvg)
+{
+    size_t i;
+    uint64_t sum=0;
+    uint16x4x4_t vPixData;
+
+    if(length%16)
+    {
+        return -1;
+    }
+    for(i=0; i<length; i+=16)
+    {
+        vPixData = vld4_u16(pSrcBuf+i);
+        sum += vaddv_u16(vPixData.val[0]);
+        sum += vaddv_u16(vPixData.val[1]);
+        sum += vaddv_u16(vPixData.val[2]);
+        sum += vaddv_u16(vPixData.val[3]);
+    }
+    outAvg = sum / (length+1);
+    return 0;
+}
+#else
+
+/*
+ * Taking source buffer and return average
+ * The buffer length should be multiple of 16
+ * x0: sum
+ * x1: src
+ * x2: len
+ * x3: tmp: using to move from neon register h0 to x3
+ * x4: for loop increment
+ * v0: SIMD vector of uint16x8_t
+ * h0: result of vector addv
+ */
+int imageAvgStridex16(uint16_t *pSrcBuf, size_t length, uint16_t &outAvg)
+{
+    uint64_t sum=0;
+    if(((length%32)!=0) || (length==0))
+    {
+        return -1;
+    }
+    asm volatile (
+        "mov  x4, %0 \n"
+        "mov  %[sum], #0\n"
+        "L1:   \n"
+        "ld1  {v0.8h}, [%[src]], #16 \n" //Load from source 16 bytes or uint16x8_t
+        "addv h0, v0.8h \n"             //Sum all vector to scalar h0
+        "umov x3, v0.d[0] \n"           //Move from neon h0 register to arm GP regiser x3
+        "add  %[sum], %[sum], x3 \n"    //Add the result of addv (h0) to total sum x0
+        "add  x4, x4, #8 \n"            //x4 is for for loop iteration
+        "cmp  x4, %[len] \n"
+        "bne  L1 \n"
+        : [sum] "+r" (sum)
+        : [src] "r" (pSrcBuf), [len] "r" (length)
+        : "memory", "v0"
+        );
+
+    outAvg = sum / length;
+    return 0;
+}
+
+#endif
+void add_float_neon3(float* dst, float* src1, float* src2, int64_t count)
+{
+    asm volatile (
+        "1: \n"
+        "ld1 {v0.4s}, [%[src1]], #16 \n"
+        "ld1 {v1.4s}, [%[src2]], #16 \n"
+        "fadd v0.4s, v0.4s, v1.4s \n"
+        "subs %[count], %[count], #4 \n"
+        "st1 {v0.4s}, [%[dst]], #16 \n"
+        "bgt 1b \n"
+        : [dst] "+r" (dst)
+        : [src1] "r" (src1), [src2] "r" (src2), [count] "r" (count)
+        : "memory", "v0", "v1"
+    );
+}
+
+
+#if 0
 int main(int argc, char* argv[])
 {
 
@@ -98,7 +237,7 @@ int main(int argc, char* argv[])
     clock_gettime(CLOCK_MONOTONIC, &timeStart);
     for(i=0;i<60;i++)
     {
-        imageApplyUVGainsNV12(pSrcImage, pDstImage, IMAGE_WIDTH, IMAGE_HEIGHT, uGain, vGain);
+        imageApplyUVGainsNV12x2(pSrcImage, pDstImage, IMAGE_WIDTH, IMAGE_HEIGHT, uGain, vGain);
     }
     clock_gettime(CLOCK_MONOTONIC, &timeEnd);
 
@@ -119,5 +258,36 @@ int main(int argc, char* argv[])
 }
 
 
+#else
+
+int main (int argc, char *argv[])
+{
+    int bufLen = 1920*1080;
+    uint16_t *imageBuf = new uint16_t [bufLen];
+    uint16_t imageAvg=0;
+    int i;
+    struct timespec timeStart, timeEnd;
+    long int timeDiff;
+
+    for(i=0; i<bufLen; i++)
+    {
+        imageBuf[i] = (i%4096)+1;
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &timeStart);
+    for(i=0;i<1000;i++)
+    {
+        imageAvgStridex16(imageBuf, bufLen, imageAvg);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &timeEnd);
+
+
+
+    printf("AVG=%d\n", imageAvg);
+    timeDiff = (timeEnd.tv_sec*1000000000L + timeEnd.tv_nsec) - (timeStart.tv_sec*1000000000L + timeStart.tv_nsec);
+    printf("Computing Time per frame=%ldus\n", timeDiff/1000/1000);
+    delete []imageBuf;
+}
+#endif
 
 
